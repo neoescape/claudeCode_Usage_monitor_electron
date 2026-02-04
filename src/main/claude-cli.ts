@@ -38,22 +38,35 @@ function parseUsageOutput(output: string): Partial<UsageData> | null {
 
 // Find Claude binary path
 function getClaudePath(): string {
-  const possiblePaths = [
-    join(homedir(), '.local/bin/claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude'
-  ]
+  const isWindows = process.platform === 'win32'
+
+  const possiblePaths = isWindows
+    ? [
+        // Windows paths
+        join(process.env.LOCALAPPDATA || '', 'Programs', 'claude', 'claude.exe'),
+        join(process.env.APPDATA || '', 'npm', 'claude.cmd'),
+        join(homedir(), 'AppData', 'Local', 'Programs', 'claude', 'claude.exe'),
+        join(homedir(), 'AppData', 'Roaming', 'npm', 'claude.cmd')
+      ]
+    : [
+        // macOS / Linux paths
+        join(homedir(), '.local/bin/claude'),
+        '/usr/local/bin/claude',
+        '/opt/homebrew/bin/claude',
+        '/usr/bin/claude'
+      ]
 
   for (const p of possiblePaths) {
     try {
-      require('fs').accessSync(p, require('fs').constants.X_OK)
+      require('fs').accessSync(p, isWindows ? require('fs').constants.F_OK : require('fs').constants.X_OK)
       return p
     } catch {
       continue
     }
   }
 
-  return 'claude'
+  // Fallback: try PATH
+  return isWindows ? 'claude.exe' : 'claude'
 }
 
 export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>> {
@@ -69,14 +82,16 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
     }
 
     const claudePath = getClaudePath()
+    const isWindows = process.platform === 'win32'
 
     // Spawn claude process
     const ptyProcess = pty.spawn(claudePath, ['--dangerously-skip-permissions'], {
-      name: 'xterm-256color',
+      name: isWindows ? 'conpty' : 'xterm-256color',
       cols: 120,
       rows: 30,
       cwd: homedir(),
-      env
+      env,
+      ...(isWindows && { useConpty: true })
     })
 
     const timeout = setTimeout(() => {
@@ -238,7 +253,8 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
 export async function checkClaudeInstalled(): Promise<boolean> {
   try {
     const claudePath = getClaudePath()
-    require('fs').accessSync(claudePath, require('fs').constants.X_OK)
+    const isWindows = process.platform === 'win32'
+    require('fs').accessSync(claudePath, isWindows ? require('fs').constants.F_OK : require('fs').constants.X_OK)
     return true
   } catch {
     return false

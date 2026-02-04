@@ -75,6 +75,7 @@ function showNotification(title: string, body: string): void {
 
 function createWindow(): void {
   const settings = loadSettings()
+  const isMac = process.platform === 'darwin'
 
   mainWindow = new BrowserWindow({
     width: 400,
@@ -83,8 +84,14 @@ function createWindow(): void {
     minHeight: 400,
     show: false,
     autoHideMenuBar: true,
-    titleBarStyle: 'hiddenInset',
-    trafficLightPosition: { x: 15, y: 15 },
+    ...(isMac
+      ? {
+          titleBarStyle: 'hiddenInset',
+          trafficLightPosition: { x: 15, y: 15 }
+        }
+      : {
+          frame: true
+        }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false
