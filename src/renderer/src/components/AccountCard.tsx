@@ -87,6 +87,7 @@ export function AccountCard({
             label="Current Session"
             percentage={currentSession}
             resetTime={sessionResetTime}
+            showCountdown={true}
           />
           <UsageGauge
             label="Weekly Usage"
