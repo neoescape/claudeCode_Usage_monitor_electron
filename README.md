@@ -6,6 +6,12 @@ A desktop application for monitoring Claude Code usage in real-time across multi
 ![Electron](https://img.shields.io/badge/electron-33.0.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+## Screenshot
+
+<p align="center">
+  <img src="docs/screenshot.png" alt="Claude Code Usage Monitor" width="400">
+</p>
+
 ## Features
 
 - **Multi-Account Support**: Monitor usage for multiple Claude Code accounts simultaneously
