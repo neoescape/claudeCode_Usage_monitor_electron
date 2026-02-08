@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { randomUUID } from 'crypto'
@@ -18,7 +18,9 @@ import {
   restartScheduler,
   fetchAllUsage,
   getLastUsageData,
-  setNotificationCallback
+  setNotificationCallback,
+  handleSystemResume,
+  resetRetryStates
 } from './scheduler'
 import { Account, AppSettings } from './types'
 
@@ -206,6 +208,7 @@ function registerIpcHandlers(): void {
 
   // Manual refresh
   ipcMain.handle('refresh-usage', async () => {
+    resetRetryStates()
     const results = await fetchAllUsage()
     return Array.from(results.entries()).map(([id, data]) => ({ id, ...data }))
   })
@@ -268,6 +271,10 @@ app.whenReady().then(() => {
 
   // Start scheduler
   startScheduler()
+
+  // Refresh immediately on system resume / screen unlock
+  powerMonitor.on('resume', () => handleSystemResume())
+  powerMonitor.on('unlock-screen', () => handleSystemResume())
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) {

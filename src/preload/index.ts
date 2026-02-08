@@ -16,6 +16,7 @@ export interface UsageData {
   weeklyResetTime: string
   lastUpdated: string
   error?: string
+  retrying?: boolean
 }
 
 export interface AppSettings {

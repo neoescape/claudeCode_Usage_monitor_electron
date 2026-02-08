@@ -8,6 +8,7 @@ interface AccountCardProps {
   weeklyResetTime: string
   lastUpdated: string
   error?: string
+  retrying?: boolean
   isLoading?: boolean
   onRemove: () => void
 }
@@ -20,6 +21,7 @@ export function AccountCard({
   weeklyResetTime,
   lastUpdated,
   error,
+  retrying,
   isLoading,
   onRemove
 }: AccountCardProps): JSX.Element {
@@ -41,18 +43,30 @@ export function AccountCard({
     }
   }
 
-  // Loading state (no data and no error)
-  const showLoading = isLoading || (!lastUpdated && !error)
+  // Initial loading: no data yet and no error
+  const showLoading = isLoading || (!lastUpdated && !error && !retrying)
+
+  // Retrying with previous data available
+  const retryingWithData = retrying && !!lastUpdated
+
+  // Retrying with no previous data
+  const retryingNoData = retrying && !lastUpdated
 
   return (
     <div className="bg-gray-800 rounded-lg p-4 mb-3">
       <div className="flex justify-between items-center mb-3">
         <div className="flex items-center gap-2">
           <h3 className="text-white font-semibold">{name}</h3>
-          {showLoading && (
+          {(showLoading || retryingNoData) && (
             <div className="flex items-center gap-1">
               <div className="w-2 h-2 bg-primary-500 rounded-full animate-pulse"></div>
               <span className="text-xs text-primary-400">Connecting</span>
+            </div>
+          )}
+          {retryingWithData && (
+            <div className="flex items-center gap-1">
+              <div className="w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></div>
+              <span className="text-xs text-yellow-400">Reconnecting...</span>
             </div>
           )}
         </div>
@@ -65,7 +79,7 @@ export function AccountCard({
         </button>
       </div>
 
-      {showLoading ? (
+      {showLoading || retryingNoData ? (
         <div className="py-6">
           <div className="flex flex-col items-center justify-center gap-3">
             <div className="flex gap-1">
@@ -73,7 +87,9 @@ export function AccountCard({
               <div className="w-2 h-2 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
               <div className="w-2 h-2 bg-primary-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
             </div>
-            <div className="text-sm text-gray-400">Fetching usage data...</div>
+            <div className="text-sm text-gray-400">
+              {retryingNoData ? 'Connecting to Claude CLI...' : 'Fetching usage data...'}
+            </div>
             <div className="text-xs text-gray-500">This may take up to 30 seconds</div>
           </div>
         </div>
@@ -82,7 +98,7 @@ export function AccountCard({
           Error: {error}
         </div>
       ) : (
-        <>
+        <div className={retryingWithData ? 'opacity-70' : ''}>
           <UsageGauge
             label="Current Session"
             percentage={currentSession}
@@ -94,10 +110,10 @@ export function AccountCard({
             percentage={weeklyUsage}
             resetTime={weeklyResetTime}
           />
-        </>
+        </div>
       )}
 
-      {!showLoading && (
+      {!showLoading && !retryingNoData && (
         <div className="text-xs text-gray-500 mt-2">
           Last updated: {formatTime(lastUpdated)}
         </div>

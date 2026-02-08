@@ -18,6 +18,7 @@ interface UsageData {
   weeklyResetTime: string
   lastUpdated: string
   error?: string
+  retrying?: boolean
 }
 
 interface AppSettings {
@@ -85,11 +86,11 @@ function App(): JSX.Element {
       const usageMap = new Map<string, UsageData>()
       if (data && Array.isArray(data)) {
         data.forEach((u) => usageMap.set(u.accountId, u))
-        // Remove accounts with data from loading state
+        // Remove accounts with data from loading state (keep retrying accounts in loading)
         setLoadingAccounts((prev) => {
           const next = new Set(prev)
           data.forEach((u) => {
-            if (u.lastUpdated || u.error) {
+            if ((u.lastUpdated || u.error) && !u.retrying) {
               next.delete(u.accountId)
             }
           })
@@ -224,6 +225,7 @@ function App(): JSX.Element {
                 weeklyResetTime={usage?.weeklyResetTime ?? ''}
                 lastUpdated={usage?.lastUpdated ?? ''}
                 error={usage?.error}
+                retrying={usage?.retrying}
                 isLoading={loadingAccounts.has(account.id)}
                 onRemove={() => handleRemoveAccount(account.id)}
               />

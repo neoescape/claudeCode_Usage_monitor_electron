@@ -13,6 +13,7 @@ export interface UsageData {
   weeklyResetTime: string // "Feb 10 at 8pm (Asia/Seoul)"
   lastUpdated: Date
   error?: string
+  retrying?: boolean
 }
 
 export interface AppSettings {
