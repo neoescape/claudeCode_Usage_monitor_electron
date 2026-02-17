@@ -23,6 +23,16 @@ import {
   resetRetryStates
 } from './scheduler'
 import { Account, AppSettings } from './types'
+import { log } from './logger'
+
+// Crash logging — capture before process dies
+process.on('uncaughtException', (err) => {
+  log.error('app', 'UNCAUGHT EXCEPTION', { message: err.message, stack: err.stack })
+})
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? { message: reason.message, stack: reason.stack } : { value: String(reason) }
+  log.error('app', 'UNHANDLED REJECTION', msg)
+})
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -173,6 +183,7 @@ function registerIpcHandlers(): void {
 
   // Add account
   ipcMain.handle('add-account', (_, name: string, useExisting: boolean) => {
+    log.info('app', 'IPC: add-account', { name, useExisting })
     const id = randomUUID()
     let configDir: string
 
@@ -201,6 +212,7 @@ function registerIpcHandlers(): void {
 
   // Remove account
   ipcMain.handle('remove-account', (_, accountId: string) => {
+    log.info('app', 'IPC: remove-account', { accountId })
     const settings = removeAccount(accountId)
     restartScheduler()
     return settings
@@ -208,6 +220,7 @@ function registerIpcHandlers(): void {
 
   // Manual refresh
   ipcMain.handle('refresh-usage', async () => {
+    log.info('app', 'IPC: refresh-usage')
     resetRetryStates()
     const results = await fetchAllUsage()
     return Array.from(results.entries()).map(([id, data]) => ({ id, ...data }))
@@ -245,6 +258,13 @@ app.whenReady().then(() => {
   // Initialize data directory
   ensureDataDir()
 
+  log.info('app', 'App ready', {
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    electron: process.versions.electron
+  })
+
   // Register IPC handlers
   registerIpcHandlers()
 
@@ -273,8 +293,14 @@ app.whenReady().then(() => {
   startScheduler()
 
   // Refresh immediately on system resume / screen unlock
-  powerMonitor.on('resume', () => handleSystemResume())
-  powerMonitor.on('unlock-screen', () => handleSystemResume())
+  powerMonitor.on('resume', () => {
+    log.info('app', 'powerMonitor: resume')
+    handleSystemResume()
+  })
+  powerMonitor.on('unlock-screen', () => {
+    log.info('app', 'powerMonitor: unlock-screen')
+    handleSystemResume()
+  })
 
   app.on('activate', function () {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -286,10 +312,12 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  log.info('app', 'before-quit')
   app.isQuitting = true
 })
 
 app.on('window-all-closed', () => {
+  log.info('app', 'window-all-closed')
   stopScheduler()
   if (process.platform !== 'darwin') {
     app.quit()

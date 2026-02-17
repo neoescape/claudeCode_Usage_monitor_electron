@@ -2,6 +2,7 @@ import * as pty from 'node-pty'
 import { UsageData } from './types'
 import { homedir } from 'os'
 import { join } from 'path'
+import { log } from './logger'
 
 // Strip ANSI escape codes
 function stripAnsi(str: string): string {
@@ -70,18 +71,54 @@ function getClaudePath(): string {
 }
 
 export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>> {
+  const claudePath = getClaudePath()
+  log.info('cli', 'fetchUsage started', { configDir, claudePath })
+
   return new Promise((resolve, reject) => {
     let output = ''
-    let resolved = false
     let usageSent = false
     let lastAction = ''
+
+    // Result storage — resolve/reject only happens via settle() after onExit
+    let pendingResult: Partial<UsageData> | null = null
+    let pendingError: Error | null = null
+    let decided = false // outcome determined (but may still await exit)
+    let exited = false  // onExit fired (FDs cleaned up)
+
+    function settle(): void {
+      if (!decided || !exited) return
+      clearTimeout(timeout)
+      clearTimeout(killSafety)
+      if (pendingResult) {
+        resolve(pendingResult)
+      } else {
+        reject(pendingError || new Error('Unknown error'))
+      }
+    }
+
+    // Mark outcome and initiate kill — actual resolve/reject deferred to settle()
+    function finish(result: Partial<UsageData> | null, error?: Error): void {
+      if (decided) return
+      decided = true
+      pendingResult = result
+      pendingError = error || null
+      try { ptyProcess.kill() } catch { /* already dead */ }
+      // Safety: if onExit doesn't fire within 5s, force settle
+      killSafety = setTimeout(() => {
+        if (!exited) {
+          log.warn('cli', 'onExit did not fire within 5s, force settling')
+          exited = true
+          settle()
+        }
+      }, 5000)
+      settle() // in case onExit already fired
+    }
 
     const env: Record<string, string> = { ...process.env } as Record<string, string>
     if (configDir) {
       env.CLAUDE_CONFIG_DIR = configDir
     }
 
-    const claudePath = getClaudePath()
     const isWindows = process.platform === 'win32'
 
     // Spawn claude process
@@ -94,20 +131,28 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
       ...(isWindows && { useConpty: true })
     })
 
+    log.info('cli', 'PTY spawned', { pid: ptyProcess.pid })
+
+    let killSafety: ReturnType<typeof setTimeout>
+
     const timeout = setTimeout(() => {
-      if (!resolved) {
-        resolved = true
-        ptyProcess.kill()
-        const parsed = parseUsageOutput(output)
-        if (parsed && (parsed.currentSession !== undefined || parsed.weeklyUsage !== undefined)) {
-          resolve(parsed)
-        } else {
-          reject(new Error('Timeout waiting for usage data'))
-        }
+      const outputTail = stripAnsi(output).slice(-500)
+      log.warn('cli', 'Timeout reached (60s)', { outputTail })
+      const parsed = parseUsageOutput(output)
+      if (parsed && (parsed.currentSession !== undefined || parsed.weeklyUsage !== undefined)) {
+        log.info('cli', 'Timeout but parsed partial data', {
+          session: parsed.currentSession,
+          weekly: parsed.weeklyUsage
+        })
+        finish(parsed)
+      } else {
+        log.error('cli', 'Timeout with no parseable data')
+        finish(null, new Error('Timeout waiting for usage data'))
       }
     }, 60000) // 60 second timeout
 
     ptyProcess.onData((data) => {
+      if (decided) return
       output += data
       const cleaned = stripAnsi(output)
 
@@ -119,6 +164,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'theme'
       ) {
         lastAction = 'theme'
+        log.debug('cli', 'Prompt detected: theme selection')
         setTimeout(() => ptyProcess.write('\r'), 300)
         return
       }
@@ -129,6 +175,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'login-method'
       ) {
         lastAction = 'login-method'
+        log.debug('cli', 'Prompt detected: login method')
         setTimeout(() => ptyProcess.write('\r'), 300)
         return
       }
@@ -140,6 +187,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'login-continue'
       ) {
         lastAction = 'login-continue'
+        log.debug('cli', 'Prompt detected: login successful')
         setTimeout(() => ptyProcess.write('\r'), 300)
         return
       }
@@ -151,6 +199,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'security'
       ) {
         lastAction = 'security'
+        log.debug('cli', 'Prompt detected: security notes')
         setTimeout(() => ptyProcess.write('\r'), 300)
         return
       }
@@ -162,6 +211,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'terminal-setup'
       ) {
         lastAction = 'terminal-setup'
+        log.debug('cli', 'Prompt detected: terminal setup')
         setTimeout(() => ptyProcess.write('\r'), 300)
         return
       }
@@ -172,6 +222,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'trust'
       ) {
         lastAction = 'trust'
+        log.debug('cli', 'Prompt detected: trust folder')
         setTimeout(() => ptyProcess.write('1\r'), 300)
         return
       }
@@ -183,6 +234,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'bypass'
       ) {
         lastAction = 'bypass'
+        log.debug('cli', 'Prompt detected: bypass permissions')
         setTimeout(() => {
           ptyProcess.write('\x1b[B') // Arrow down
           setTimeout(() => ptyProcess.write('\r'), 200)
@@ -199,6 +251,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
 
       if (hasMainPrompt && !usageSent) {
         usageSent = true
+        log.info('cli', 'Main prompt ready, sending /usage')
         setTimeout(() => {
           ptyProcess.write('/usage')
           setTimeout(() => ptyProcess.write('\r'), 500)
@@ -213,6 +266,7 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
         lastAction !== 'usage-enter'
       ) {
         lastAction = 'usage-enter'
+        log.debug('cli', 'Prompt detected: usage autocomplete menu')
         setTimeout(() => ptyProcess.write('\r'), 300)
         return
       }
@@ -222,30 +276,39 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
       if (usedMatches && usedMatches.length >= 2 && usageSent) {
         const parsed = parseUsageOutput(output)
         if (parsed && parsed.currentSession !== undefined && parsed.weeklyUsage !== undefined) {
-          if (!resolved) {
-            resolved = true
-            clearTimeout(timeout)
-            ptyProcess.write('\x03') // Ctrl+C
-            setTimeout(() => {
-              ptyProcess.kill()
-              resolve(parsed)
-            }, 500)
-          }
+          log.info('cli', 'Parse success', {
+            session: parsed.currentSession,
+            sessionReset: parsed.sessionResetTime,
+            weekly: parsed.weeklyUsage,
+            weeklyReset: parsed.weeklyResetTime
+          })
+          ptyProcess.write('\x03') // Ctrl+C
+          finish(parsed)
         }
       }
     })
 
-    ptyProcess.onExit(() => {
-      clearTimeout(timeout)
-      if (!resolved) {
-        resolved = true
+    ptyProcess.onExit(({ exitCode, signal }) => {
+      log.info('cli', 'PTY exited', { exitCode, signal })
+      exited = true
+
+      if (!decided) {
+        // Process exited before we got a result
         const parsed = parseUsageOutput(output)
         if (parsed) {
-          resolve(parsed)
+          log.info('cli', 'Parsed data on exit', {
+            session: parsed.currentSession,
+            weekly: parsed.weeklyUsage
+          })
+          finish(parsed)
         } else {
-          reject(new Error('Retrying...'))
+          const outputTail = stripAnsi(output).slice(-500)
+          log.error('cli', 'No parseable data on exit', { exitCode, signal, outputTail })
+          finish(null, new Error('Retrying...'))
         }
       }
+
+      settle()
     })
   })
 }
