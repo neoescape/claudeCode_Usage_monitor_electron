@@ -296,15 +296,23 @@ app.whenReady().then(() => {
         type: 'warning',
         title: 'System PTY Exhausted',
         message: '시스템 PTY 디바이스가 고갈되어 데이터를 수집할 수 없습니다.',
-        detail: '앱을 재시작하면 복구될 수 있습니다. 재시작하시겠습니까?',
-        buttons: ['재시작', '나중에'],
+        detail: is.dev
+          ? '앱을 종료합니다. npm run dev로 다시 시작하세요.'
+          : '앱을 재시작하면 복구될 수 있습니다. 재시작하시겠습니까?',
+        buttons: [is.dev ? '종료' : '재시작', '나중에'],
         defaultId: 0
       })
       .then(({ response }) => {
         if (response === 0) {
           log.info('app', 'User requested restart due to PTY exhaustion')
-          app.relaunch()
-          app.exit(0)
+          if (is.dev) {
+            // Dev mode: app.relaunch() won't restart Vite dev server, so just exit
+            log.info('app', 'Dev mode — exiting (user must restart manually with npm run dev)')
+            app.exit(0)
+          } else {
+            app.relaunch()
+            app.exit(0)
+          }
         } else {
           log.info('app', 'User deferred restart')
           restartPending = false
