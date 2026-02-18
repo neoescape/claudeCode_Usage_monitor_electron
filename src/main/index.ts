@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { randomUUID } from 'crypto'
@@ -20,7 +20,8 @@ import {
   getLastUsageData,
   setNotificationCallback,
   handleSystemResume,
-  resetRetryStates
+  resetRetryStates,
+  setPtyExhaustedCallback
 } from './scheduler'
 import { Account, AppSettings } from './types'
 import { log } from './logger'
@@ -281,6 +282,35 @@ app.whenReady().then(() => {
         `Weekly usage has reached ${usage}%.`
       )
     }
+  })
+
+  // Set PTY exhaustion callback — prompt user to restart
+  let restartPending = false
+  setPtyExhaustedCallback(() => {
+    if (restartPending) return
+    restartPending = true
+    log.error('app', 'PTY exhaustion detected — prompting user to restart')
+    stopScheduler()
+    dialog
+      .showMessageBox({
+        type: 'warning',
+        title: 'System PTY Exhausted',
+        message: '시스템 PTY 디바이스가 고갈되어 데이터를 수집할 수 없습니다.',
+        detail: '앱을 재시작하면 복구될 수 있습니다. 재시작하시겠습니까?',
+        buttons: ['재시작', '나중에'],
+        defaultId: 0
+      })
+      .then(({ response }) => {
+        if (response === 0) {
+          log.info('app', 'User requested restart due to PTY exhaustion')
+          app.relaunch()
+          app.exit(0)
+        } else {
+          log.info('app', 'User deferred restart')
+          restartPending = false
+          startScheduler()
+        }
+      })
   })
 
   // Create tray
