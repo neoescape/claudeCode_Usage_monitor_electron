@@ -47,13 +47,25 @@
       "out/**/*"
     ],
     "mac": {
+      "icon": "build/icon.icns",
       "category": "public.app-category.utilities",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "target": [
         {
           "target": "dmg",
           "arch": ["x64", "arm64"]
         }
-      ]
+      ],
+      "extendInfo": {
+        "NSCameraUsageDescription": null,
+        "NSMicrophoneUsageDescription": null,
+        "NSBluetoothAlwaysUsageDescription": null,
+        "NSBluetoothPeripheralUsageDescription": null
+      }
+    },
+    "dmg": {
+      "icon": "build/icon.icns"
     },
     "win": {
       "target": [
