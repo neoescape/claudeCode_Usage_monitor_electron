@@ -115,6 +115,8 @@ export async function fetchUsage(configDir?: string): Promise<Partial<UsageData>
     }
 
     const env: Record<string, string> = { ...process.env } as Record<string, string>
+    // Remove CLAUDECODE to prevent "nested session" error when launched from Claude Code terminal
+    delete env.CLAUDECODE
     if (configDir) {
       env.CLAUDE_CONFIG_DIR = configDir
     }
