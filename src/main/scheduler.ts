@@ -2,7 +2,6 @@ import { BrowserWindow } from 'electron'
 import { fetchUsage } from './claude-cli'
 import { loadSettings, setUsageData, getUsageCache } from './store'
 import { UsageData } from './types'
-import { log } from './logger'
 
 let schedulerTimeoutId: ReturnType<typeof setTimeout> | null = null
 let mainWindow: BrowserWindow | null = null
@@ -17,8 +16,8 @@ const notifiedThresholds = new Map<string, { session: number[]; weekly: number[]
 
 // Exponential backoff for retries
 const INITIAL_BACKOFF_MS = 5_000
-const MAX_BACKOFF_MS = 180_000 // 3 min — matches default refresh interval to avoid hammering during systemic failures
-const backoffState = new Map<string, number>() // accountId -> current backoff ms
+const MAX_BACKOFF_MS = 180_000 // 3 min
+const backoffState = new Map<string, number>()
 const retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // Duplicate fetch guard
@@ -50,36 +49,21 @@ function checkAndNotify(
 ): void {
   if (!notificationCallback) return
 
-  // Initialize notification record for account
   if (!notifiedThresholds.has(accountId)) {
     notifiedThresholds.set(accountId, { session: [], weekly: [] })
   }
 
   const record = notifiedThresholds.get(accountId)!
 
-  // Check session thresholds
   for (const threshold of ALERT_THRESHOLDS) {
     if (currentSession >= threshold && !record.session.includes(threshold)) {
-      log.info('scheduler', 'Alert threshold reached', {
-        accountId,
-        type: 'session',
-        threshold,
-        current: currentSession
-      })
       notificationCallback(accountName, threshold, 'session')
       record.session.push(threshold)
     }
   }
 
-  // Check weekly thresholds
   for (const threshold of ALERT_THRESHOLDS) {
     if (weeklyUsage >= threshold && !record.weekly.includes(threshold)) {
-      log.info('scheduler', 'Alert threshold reached', {
-        accountId,
-        type: 'weekly',
-        threshold,
-        current: weeklyUsage
-      })
       notificationCallback(accountName, threshold, 'weekly')
       record.weekly.push(threshold)
     }
@@ -106,18 +90,15 @@ function cancelRetryTimer(accountId: string): void {
 }
 
 function cancelAllRetryTimers(): void {
-  for (const [id, timer] of retryTimers) {
+  for (const [, timer] of retryTimers) {
     clearTimeout(timer)
-    retryTimers.delete(id)
   }
+  retryTimers.clear()
   backoffState.clear()
 }
 
 function sendUsageUpdate(): void {
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    log.warn('scheduler', 'sendUsageUpdate skipped — window invalid')
-    return
-  }
+  if (!mainWindow || mainWindow.isDestroyed()) return
   const cache = getUsageCache()
   const usageArray = Array.from(cache.entries()).map(([id, data]) => ({
     id,
@@ -129,7 +110,6 @@ function sendUsageUpdate(): void {
 function scheduleRetry(accountId: string, accountName: string, configDir: string): void {
   cancelRetryTimer(accountId)
   const delay = getNextBackoff(accountId)
-  log.info('scheduler', 'Scheduling retry', { accountId, delay })
 
   const timer = setTimeout(async () => {
     retryTimers.delete(accountId)
@@ -145,15 +125,9 @@ function scheduleRetry(accountId: string, accountName: string, configDir: string
       }
       setUsageData(accountId, data)
       resetBackoff(accountId)
-      log.info('scheduler', 'Retry succeeded', { accountId })
       checkAndNotify(accountId, accountName, data.currentSession, data.weeklyUsage)
       sendUsageUpdate()
     } catch (err) {
-      log.warn('scheduler', 'Retry failed', {
-        accountId,
-        error: err instanceof Error ? err.message : String(err)
-      })
-      // Still failing — set retrying state preserving cached data
       const cached = getUsageCache().get(accountId)
       const data: UsageData = {
         accountId,
@@ -164,7 +138,6 @@ function scheduleRetry(accountId: string, accountName: string, configDir: string
         lastUpdated: cached?.lastUpdated ?? new Date(),
         retrying: true
       }
-      // Keep lastUpdated from cache if we had previous success
       if (!cached?.lastUpdated || cached?.retrying) {
         data.lastUpdated = undefined as unknown as Date
       }
@@ -182,7 +155,6 @@ async function fetchAccountUsage(
   accountName: string,
   configDir: string
 ): Promise<UsageData> {
-  log.info('scheduler', 'fetchAccountUsage started', { accountId, accountName })
   try {
     const usage = await fetchUsage(configDir)
     const data: UsageData = {
@@ -195,27 +167,15 @@ async function fetchAccountUsage(
     }
     setUsageData(accountId, data)
 
-    // Reset backoff on success + cancel any pending retry
     resetBackoff(accountId)
     cancelRetryTimer(accountId)
 
-    // Check for alerts
     checkAndNotify(accountId, accountName, data.currentSession, data.weeklyUsage)
 
     lastFetchError = ''
-    log.info('scheduler', 'fetchAccountUsage success', {
-      accountId,
-      session: data.currentSession,
-      weekly: data.weeklyUsage
-    })
     return data
   } catch (err) {
     lastFetchError = err instanceof Error ? err.message : String(err)
-    log.error('scheduler', 'fetchAccountUsage failed', {
-      accountId,
-      error: lastFetchError
-    })
-    // Preserve previous cached data if available
     const cached = getUsageCache().get(accountId)
     const data: UsageData = {
       accountId,
@@ -228,7 +188,6 @@ async function fetchAccountUsage(
     }
     setUsageData(accountId, data)
 
-    // Schedule individual retry for this account
     scheduleRetry(accountId, accountName, configDir)
 
     return data
@@ -236,20 +195,16 @@ async function fetchAccountUsage(
 }
 
 export async function fetchAllUsage(): Promise<Map<string, UsageData>> {
-  // Duplicate execution guard
   if (isFetching) {
-    log.warn('scheduler', 'fetchAllUsage skipped — isFetching is true')
     return getUsageCache()
   }
   isFetching = true
-  log.info('scheduler', 'fetchAllUsage started')
 
   try {
     const settings = loadSettings()
     const results = new Map<string, UsageData>()
     const errors: string[] = []
 
-    // Execute sequentially (prevent multiple claude instances running simultaneously)
     for (const account of settings.accounts) {
       if (account.isActive) {
         const data = await fetchAccountUsage(account.id, account.name, account.configDir)
@@ -260,22 +215,18 @@ export async function fetchAllUsage(): Promise<Map<string, UsageData>> {
       }
     }
 
-    // Send update to renderer
     sendUsageUpdate()
 
     // Detect systemic PTY exhaustion: all accounts failed with posix_spawnp
     if (errors.length > 0 && errors.length === results.size && errors.every(e => e.includes('posix_spawnp'))) {
       if (!ptyExhaustedNotified && ptyExhaustedCallback) {
         ptyExhaustedNotified = true
-        log.error('scheduler', 'PTY exhaustion detected — all accounts failing with posix_spawnp')
         ptyExhaustedCallback()
       }
     } else if (errors.length < results.size) {
-      // At least one account succeeded — reset the flag
       ptyExhaustedNotified = false
     }
 
-    log.info('scheduler', 'fetchAllUsage completed', { accountCount: results.size })
     return results
   } finally {
     isFetching = false
@@ -295,18 +246,10 @@ export function startScheduler(): void {
 
   const settings = loadSettings()
 
-  // Don't start scheduler if no accounts
   if (settings.accounts.length === 0) {
-    log.info('scheduler', 'startScheduler skipped — no accounts')
     return
   }
 
-  log.info('scheduler', 'startScheduler', {
-    accountCount: settings.accounts.length,
-    refreshInterval: settings.refreshInterval
-  })
-
-  // Execute first fetch immediately, then chain via setTimeout
   fetchAllUsage().then(() => {
     scheduleNextFetch()
   })
@@ -316,13 +259,11 @@ export function stopScheduler(): void {
   if (schedulerTimeoutId) {
     clearTimeout(schedulerTimeoutId)
     schedulerTimeoutId = null
-    log.info('scheduler', 'stopScheduler — cleared timeout')
   }
   cancelAllRetryTimers()
 }
 
 export function restartScheduler(): void {
-  log.info('scheduler', 'restartScheduler')
   stopScheduler()
   startScheduler()
 }
@@ -331,29 +272,20 @@ export function getLastUsageData(): UsageData[] {
   return Array.from(getUsageCache().values())
 }
 
-// Reset notification record (used when reset time has passed)
 export function resetNotificationRecord(accountId: string): void {
   notifiedThresholds.delete(accountId)
 }
 
 /** Called on system resume / screen unlock — resets all backoff and fetches immediately */
 export function handleSystemResume(): void {
-  log.info('scheduler', 'handleSystemResume — resetting isFetching and restarting')
-
-  // Fix: clear stuck isFetching flag from interrupted fetch
   isFetching = false
   ptyExhaustedNotified = false
-
-  // Cancel all pending retry timers and reset backoff
   cancelAllRetryTimers()
-
-  // Restart the scheduler (cancels current timeout + immediate fetch + re-chain)
   stopScheduler()
   startScheduler()
 }
 
 /** Called on manual refresh — resets retry states so UI updates cleanly */
 export function resetRetryStates(): void {
-  log.info('scheduler', 'resetRetryStates')
   cancelAllRetryTimers()
 }

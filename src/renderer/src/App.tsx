@@ -122,6 +122,12 @@ function App(): JSX.Element {
     }
   }, [])
 
+  const handleRenameAccount = useCallback(async (accountId: string, newName: string): Promise<void> => {
+    if (!window.api) return
+    const result = await window.api.renameAccount(accountId, newName)
+    setSettings(result)
+  }, [])
+
   const handleRemoveAccount = useCallback(async (accountId: string): Promise<void> => {
     if (!window.api) return
     const confirmed = confirm('Are you sure you want to remove this account?')
@@ -227,6 +233,7 @@ function App(): JSX.Element {
                 error={usage?.error}
                 retrying={usage?.retrying}
                 isLoading={loadingAccounts.has(account.id)}
+                onRename={(newName) => handleRenameAccount(account.id, newName)}
                 onRemove={() => handleRemoveAccount(account.id)}
               />
             )

@@ -9,6 +9,7 @@ import {
   saveSettings,
   addAccount,
   removeAccount,
+  renameAccount,
   ensureDataDir
 } from './store'
 import {
@@ -24,16 +25,6 @@ import {
   setPtyExhaustedCallback
 } from './scheduler'
 import { Account, AppSettings } from './types'
-import { log } from './logger'
-
-// Crash logging — capture before process dies
-process.on('uncaughtException', (err) => {
-  log.error('app', 'UNCAUGHT EXCEPTION', { message: err.message, stack: err.stack })
-})
-process.on('unhandledRejection', (reason) => {
-  const msg = reason instanceof Error ? { message: reason.message, stack: reason.stack } : { value: String(reason) }
-  log.error('app', 'UNHANDLED REJECTION', msg)
-})
 
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
@@ -184,7 +175,6 @@ function registerIpcHandlers(): void {
 
   // Add account
   ipcMain.handle('add-account', (_, name: string, useExisting: boolean) => {
-    log.info('app', 'IPC: add-account', { name, useExisting })
     const id = randomUUID()
     let configDir: string
 
@@ -213,15 +203,18 @@ function registerIpcHandlers(): void {
 
   // Remove account
   ipcMain.handle('remove-account', (_, accountId: string) => {
-    log.info('app', 'IPC: remove-account', { accountId })
     const settings = removeAccount(accountId)
     restartScheduler()
     return settings
   })
 
+  // Rename account
+  ipcMain.handle('rename-account', (_, accountId: string, newName: string) => {
+    return renameAccount(accountId, newName)
+  })
+
   // Manual refresh
   ipcMain.handle('refresh-usage', async () => {
-    log.info('app', 'IPC: refresh-usage')
     resetRetryStates()
     const results = await fetchAllUsage()
     return Array.from(results.entries()).map(([id, data]) => ({ id, ...data }))
@@ -259,13 +252,6 @@ app.whenReady().then(() => {
   // Initialize data directory
   ensureDataDir()
 
-  log.info('app', 'App ready', {
-    version: app.getVersion(),
-    platform: process.platform,
-    arch: process.arch,
-    electron: process.versions.electron
-  })
-
   // Register IPC handlers
   registerIpcHandlers()
 
@@ -289,32 +275,25 @@ app.whenReady().then(() => {
   setPtyExhaustedCallback(() => {
     if (restartPending) return
     restartPending = true
-    log.error('app', 'PTY exhaustion detected — prompting user to restart')
     stopScheduler()
     dialog
       .showMessageBox({
         type: 'warning',
-        title: 'System PTY Exhausted',
-        message: '시스템 PTY 디바이스가 고갈되어 데이터를 수집할 수 없습니다.',
-        detail: is.dev
-          ? '앱을 종료합니다. npm run dev로 다시 시작하세요.'
-          : '앱을 재시작하면 복구될 수 있습니다. 재시작하시겠습니까?',
+        title: '데이터 갱신 오류',
+        message: '클로드 데이터가 갱신되지 않습니다.',
+        detail: '앱을 껐다가 다시 켜주세요.',
         buttons: [is.dev ? '종료' : '재시작', '나중에'],
         defaultId: 0
       })
       .then(({ response }) => {
         if (response === 0) {
-          log.info('app', 'User requested restart due to PTY exhaustion')
           if (is.dev) {
-            // Dev mode: app.relaunch() won't restart Vite dev server, so just exit
-            log.info('app', 'Dev mode — exiting (user must restart manually with npm run dev)')
             app.exit(0)
           } else {
             app.relaunch()
             app.exit(0)
           }
         } else {
-          log.info('app', 'User deferred restart')
           restartPending = false
           startScheduler()
         }
@@ -332,11 +311,9 @@ app.whenReady().then(() => {
 
   // Refresh immediately on system resume / screen unlock
   powerMonitor.on('resume', () => {
-    log.info('app', 'powerMonitor: resume')
     handleSystemResume()
   })
   powerMonitor.on('unlock-screen', () => {
-    log.info('app', 'powerMonitor: unlock-screen')
     handleSystemResume()
   })
 
@@ -350,12 +327,10 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
-  log.info('app', 'before-quit')
   app.isQuitting = true
 })
 
 app.on('window-all-closed', () => {
-  log.info('app', 'window-all-closed')
   stopScheduler()
   if (process.platform !== 'darwin') {
     app.quit()

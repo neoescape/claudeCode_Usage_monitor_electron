@@ -52,6 +52,16 @@ export function removeAccount(accountId: string): AppSettings {
   return settings
 }
 
+export function renameAccount(accountId: string, newName: string): AppSettings {
+  const settings = loadSettings()
+  const account = settings.accounts.find((a) => a.id === accountId)
+  if (account) {
+    account.name = newName
+    saveSettings(settings)
+  }
+  return settings
+}
+
 // Usage data cache (in-memory)
 const usageCache = new Map<string, UsageData>()
 

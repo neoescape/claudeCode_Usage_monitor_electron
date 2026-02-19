@@ -42,6 +42,8 @@ const api = {
     ipcRenderer.invoke('add-account', name, useExisting),
   removeAccount: (accountId: string): Promise<AppSettings> =>
     ipcRenderer.invoke('remove-account', accountId),
+  renameAccount: (accountId: string, newName: string): Promise<AppSettings> =>
+    ipcRenderer.invoke('rename-account', accountId, newName),
 
   // Usage data
   refreshUsage: (): Promise<UsageData[]> => ipcRenderer.invoke('refresh-usage'),
