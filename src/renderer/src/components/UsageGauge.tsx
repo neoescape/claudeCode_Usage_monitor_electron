@@ -13,35 +13,36 @@ function getColorClass(percentage: number): string {
   return 'bg-primary-500'
 }
 
-// Parse reset time like "11pm(Asia/Seoul)" or "2am (Asia/Seoul)"
+// Parse reset time from ISO 8601 string (e.g. "2026-02-25T19:00:00+00:00")
 function parseResetTime(resetTime: string): Date | null {
   if (!resetTime) return null
 
   try {
-    // Extract hour and am/pm
-    const match = resetTime.match(/(\d{1,2})(am|pm)/i)
-    if (!match) return null
-
-    let hour = parseInt(match[1], 10)
-    const isPM = match[2].toLowerCase() === 'pm'
-
-    // Convert to 24-hour format
-    if (isPM && hour !== 12) hour += 12
-    if (!isPM && hour === 12) hour = 0
-
-    const now = new Date()
-    const resetDate = new Date(now)
-    resetDate.setHours(hour, 0, 0, 0)
-
-    // If reset time is in the past, add a day
-    if (resetDate <= now) {
-      resetDate.setDate(resetDate.getDate() + 1)
-    }
-
-    return resetDate
+    const date = new Date(resetTime)
+    if (isNaN(date.getTime())) return null
+    return date
   } catch {
     return null
   }
+}
+
+// Format ISO 8601 reset time to user-friendly local string (e.g. "3:00 AM" or "Mar 4, 8:00 PM")
+function formatResetTimeDisplay(resetTime: string): string {
+  const date = parseResetTime(resetTime)
+  if (!date) return resetTime
+
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+
+  const tomorrow = new Date(now)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const isTomorrow = date.toDateString() === tomorrow.toDateString()
+
+  const timeStr = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+
+  if (isToday) return `today ${timeStr}`
+  if (isTomorrow) return `tomorrow ${timeStr}`
+  return date.toLocaleDateString([], { month: 'short', day: 'numeric' }) + `, ${timeStr}`
 }
 
 function formatCountdown(resetDate: Date | null): string {
@@ -101,7 +102,7 @@ export function UsageGauge({ label, percentage, resetTime, showCountdown = false
       </div>
       {resetTime && (
         <div className="text-xs text-gray-500 mt-1">
-          Resets {resetTime}
+          Resets {formatResetTimeDisplay(resetTime)}
         </div>
       )}
     </div>

@@ -8,12 +8,13 @@ export interface Account {
 export interface UsageData {
   accountId: string
   currentSession: number // 0-100 (%)
-  sessionResetTime: string // "2am (Asia/Seoul)"
+  sessionResetTime: string // ISO 8601: "2026-02-25T19:00:00+00:00"
   weeklyUsage: number // 0-100 (%)
-  weeklyResetTime: string // "Feb 10 at 8pm (Asia/Seoul)"
+  weeklyResetTime: string // ISO 8601: "2026-03-04T14:00:00+00:00"
   lastUpdated: Date
   error?: string
   retrying?: boolean
+  subscriptionType?: string
 }
 
 export interface AppSettings {

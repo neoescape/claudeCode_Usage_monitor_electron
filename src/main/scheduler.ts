@@ -8,8 +8,6 @@ let mainWindow: BrowserWindow | null = null
 let notificationCallback:
   | ((accountName: string, usage: number, type: 'session' | 'weekly') => void)
   | null = null
-let ptyExhaustedCallback: (() => void) | null = null
-let ptyExhaustedNotified = false
 
 // Track notified thresholds (prevent duplicate notifications)
 const notifiedThresholds = new Map<string, { session: number[]; weekly: number[] }>()
@@ -22,8 +20,6 @@ const retryTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 // Duplicate fetch guard
 let isFetching = false
-// Last error message from fetchAccountUsage (used for PTY exhaustion detection)
-let lastFetchError = ''
 
 const ALERT_THRESHOLDS = [80, 90, 100]
 
@@ -35,10 +31,6 @@ export function setNotificationCallback(
   callback: (accountName: string, usage: number, type: 'session' | 'weekly') => void
 ): void {
   notificationCallback = callback
-}
-
-export function setPtyExhaustedCallback(callback: () => void): void {
-  ptyExhaustedCallback = callback
 }
 
 function checkAndNotify(
@@ -172,10 +164,8 @@ async function fetchAccountUsage(
 
     checkAndNotify(accountId, accountName, data.currentSession, data.weeklyUsage)
 
-    lastFetchError = ''
     return data
   } catch (err) {
-    lastFetchError = err instanceof Error ? err.message : String(err)
     const cached = getUsageCache().get(accountId)
     const data: UsageData = {
       accountId,
@@ -203,29 +193,15 @@ export async function fetchAllUsage(): Promise<Map<string, UsageData>> {
   try {
     const settings = loadSettings()
     const results = new Map<string, UsageData>()
-    const errors: string[] = []
 
     for (const account of settings.accounts) {
       if (account.isActive) {
         const data = await fetchAccountUsage(account.id, account.name, account.configDir)
         results.set(account.id, data)
-        if (data.retrying) {
-          errors.push(lastFetchError)
-        }
       }
     }
 
     sendUsageUpdate()
-
-    // Detect systemic PTY exhaustion: all accounts failed with posix_spawnp
-    if (errors.length > 0 && errors.length === results.size && errors.every(e => e.includes('posix_spawnp'))) {
-      if (!ptyExhaustedNotified && ptyExhaustedCallback) {
-        ptyExhaustedNotified = true
-        ptyExhaustedCallback()
-      }
-    } else if (errors.length < results.size) {
-      ptyExhaustedNotified = false
-    }
 
     return results
   } finally {
@@ -279,7 +255,6 @@ export function resetNotificationRecord(accountId: string): void {
 /** Called on system resume / screen unlock — resets all backoff and fetches immediately */
 export function handleSystemResume(): void {
   isFetching = false
-  ptyExhaustedNotified = false
   cancelAllRetryTimers()
   stopScheduler()
   startScheduler()

@@ -1,4 +1,4 @@
-import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor, dialog } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, Tray, Menu, nativeImage, Notification, powerMonitor } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import { randomUUID } from 'crypto'
@@ -21,8 +21,7 @@ import {
   getLastUsageData,
   setNotificationCallback,
   handleSystemResume,
-  resetRetryStates,
-  setPtyExhaustedCallback
+  resetRetryStates
 } from './scheduler'
 import { Account, AppSettings } from './types'
 
@@ -268,36 +267,6 @@ app.whenReady().then(() => {
         `Weekly usage has reached ${usage}%.`
       )
     }
-  })
-
-  // Set PTY exhaustion callback — prompt user to restart
-  let restartPending = false
-  setPtyExhaustedCallback(() => {
-    if (restartPending) return
-    restartPending = true
-    stopScheduler()
-    dialog
-      .showMessageBox({
-        type: 'warning',
-        title: '데이터 갱신 오류',
-        message: '클로드 데이터가 갱신되지 않습니다.',
-        detail: '앱을 껐다가 다시 켜주세요.',
-        buttons: [is.dev ? '종료' : '재시작', '나중에'],
-        defaultId: 0
-      })
-      .then(({ response }) => {
-        if (response === 0) {
-          if (is.dev) {
-            app.exit(0)
-          } else {
-            app.relaunch()
-            app.exit(0)
-          }
-        } else {
-          restartPending = false
-          startScheduler()
-        }
-      })
   })
 
   // Create tray
